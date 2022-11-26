@@ -1,43 +1,47 @@
-# REPL over BLE UART
+# Proof-of-concept of a REPL over BLE UART.
+#
+# Tested with the Adafruit Bluefruit app on Android.
+# Set the EoL characters to \r\n.
 
-import uos
-from machine import Timer
-from ble_uart_peripheral import BLEUART, _UART_SERVICE_UUID, _UART_TX_UUID, _UART_RX_UUID
+import bluetooth
+import io
+import os
+import micropython
+import machine
+
+from ble_uart_peripheral import BLEUART
 
 _MP_STREAM_POLL = const(3)
 _MP_STREAM_POLL_RD = const(0x0001)
 
+# TODO: Remove this when STM32 gets machine.Timer.
+if hasattr(machine, "Timer"):
+    _timer = machine.Timer(-1)
+else:
+    _timer = None
+
+# Batch writes into 50ms intervals.
+def schedule_in(handler, delay_ms):
+    def _wrap(_arg):
+        handler()
+
+    if _timer:
+        _timer.init(mode=machine.Timer.ONE_SHOT, period=delay_ms, callback=_wrap)
+    else:
+        micropython.schedule(_wrap, None)
+
+
 # Simple buffering stream to support the dupterm requirements.
-class BLEUARTStream:
-    def __init__(self, uart=None):
-        if uart is None:
-            uart = BLEUART(name="BLEUARTREPL", service_uuid = _UART_SERVICE_UUID, rx_uuid = _UART_RX_UUID, tx_uuid = _UART_TX_UUID )
+class BLEUARTStream(io.IOBase):
+    def __init__(self, uart):
         self._uart = uart
         self._tx_buf = bytearray()
-        self.tx_max_len = 100
-        self.tx_delay_ms = 20
-        self._uart.set_connect_handler(self.on_connect_status_changed)
-        self.prev_term = None
-        self._timer = None
+        self._uart.irq(self._on_rx)
 
-    def _wrap_flush(self, alarm):
-        self._flush()
-
-    def schedule_tx(self):
-        self._timer = Timer.Alarm(self._wrap_flush, ms=self.tx_delay_ms, periodic=False)
-
-    def on_connect_status_changed(self, is_connected):
-        if is_connected:
-            self.prev_term = uos.dupterm()
-            print("BLEUARTStream (REPL) Connected")
-            print("old dupterm: %s" % self.prev_term)
-            uos.dupterm(self)
-        else:
-            #removes ble dupterm
-            if self.prev_term:
-                print("inserting old dupterm %s" % self.prev_term)
-                uos.dupterm(self.prev_term)
-                print("BLEUARTStream (REPL) Disconnected")
+    def _on_rx(self):
+        # Needed for ESP32.
+        if hasattr(os, "dupterm_notify"):
+            os.dupterm_notify(None)
 
     def read(self, sz=None):
         return self._uart.read(sz)
@@ -57,14 +61,23 @@ class BLEUARTStream:
         return 0
 
     def _flush(self):
-        data = self._tx_buf[0:self.tx_max_len]
-        self._tx_buf = self._tx_buf[self.tx_max_len:]
+        data = self._tx_buf[0:100]
+        self._tx_buf = self._tx_buf[100:]
         self._uart.write(data)
         if self._tx_buf:
-            self.schedule_tx()
+            schedule_in(self._flush, 50)
 
     def write(self, buf):
         empty = not self._tx_buf
         self._tx_buf += buf
         if empty:
-            self.schedule_tx()
+            schedule_in(self._flush, 50)
+
+
+def start():
+    ble = bluetooth.BLE()
+    uart = BLEUART(ble, name="mpy-repl")
+    stream = BLEUARTStream(uart)
+
+    os.dupterm(stream)
+

@@ -1,13 +1,8 @@
-#main.py
-#from kits import kit_main
-#kit_main.load_kit()]
-from jemwifi import *
-from jem_help import jem_help
+from ble_uart_repl import *
+from ble_uart_peripheral import *
 
-global wlan
-wlan = setup_wifi()
+ble = bluetooth.BLE()
+uart = BLEUART(ble, name="mpy-repl")
+stream = BLEUARTStream(uart)
 
-from kits.kit import Kit
-
-kit = Kit()
-kit.start()
+os.dupterm(stream)
