@@ -9,41 +9,136 @@ _IRQ_CENTRAL_CONNECT = const(1)
 _IRQ_CENTRAL_DISCONNECT = const(2)
 _IRQ_GATTS_WRITE = const(3)
 
-_FLAG_WRITE = const(0x0008)
-_FLAG_NOTIFY = const(0x0010)
+F_READ = bluetooth.FLAG_READ
+F_WRITE = bluetooth.FLAG_WRITE
+F_NOTIFY = bluetooth.FLAG_NOTIFY
+F_READ_WRITE = bluetooth.FLAG_READ | bluetooth.FLAG_WRITE
+F_READ_NOTIFY = bluetooth.FLAG_READ | bluetooth.FLAG_NOTIFY
+F_RD_WR_NTFY = bluetooth.FLAG_READ | bluetooth.FLAG_WRITE | bluetooth.FLAG_NOTIFY
+
 
 _UART_UUID = bluetooth.UUID("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
 _UART_TX = (
     bluetooth.UUID("6E400003-B5A3-F393-E0A9-E50E24DCCA9E"),
-    _FLAG_NOTIFY,
+    F_NOTIFY,
 )
 _UART_RX = (
     bluetooth.UUID("6E400002-B5A3-F393-E0A9-E50E24DCCA9E"),
-    _FLAG_WRITE,
+    F_WRITE,
 )
 _UART_SERVICE = (
     _UART_UUID,
     (_UART_TX, _UART_RX),
 )
 
+# BLE UART FTP Service
+_FTP_UART_UUID = bluetooth.UUID("6E400001-B5A3-F393-E0A9-E50E24DCCA77")
+
+_FTP_UART_TX = (
+    bluetooth.UUID("6E400003-B5A3-F393-E0A9-E50E24DCCA77"),
+    F_NOTIFY,
+)
+
+_FTP_UART_RX = (
+    bluetooth.UUID("6E400002-B5A3-F393-E0A9-E50E24DCCA77"),
+    F_WRITE,
+)
+
+_FTP_UART_SERVICE = (
+    _FTP_UART_UUID,
+    (_FTP_UART_TX, _FTP_UART_RX),
+)
+
 # org.bluetooth.characteristic.gap.appearance.xml
 _ADV_APPEARANCE_GENERIC_COMPUTER = const(128)
 
+class BleCharacteristic:
+    def __init__(self, uuid):
+        self.uuid = bluetooth.UUID(uuid)
+        self.handler = None
+        self.trigger = None
+
+    def callback(self, trigger, handler):
+        # ex: rx_callback = rx_char.callback(trigger=Bluetooth.CHAR_WRITE_EVENT, handler=self.rx_cb_handler)
+        self.trigger = trigger
+        self.handler = handler
+
+class BleService:
+    # ex: uuid = "6E400003-B5A3-F393-E0A9-E50E24DCCA77"
+    def __init__(self, uuid, isPrimary=False):
+        self.is_primary = isPrimary
+        self.uuid = bluetooth.UUID(uuid)
+        self.chr_uuids = []
+        self.chrs = []
+
+    def get(self):
+        flag = F_RD_WR_NTFY
+        chrs = [ [bluetooth.UUID(uuid), flag]  for uuid in self.chr_uuids]
+        service = [self.uuid, chrs ]
+        #ex: service = ( _UART_UUID, (_UART_TX, _UART_RX), )
+        return service
+
+    def characteristic(self, uuid):
+        if uuid not in self.chr_uuids:
+            ble_char = BleCharacteristic(uuid)
+            self.chrs.append(ble_char)
+            self.chr_uuids.append(uuid)
+            return ble_char
+
+class BLE:
+    def __init__(self, ble, name="JEM-BLE"):
+        self._ble = ble # bluetooth.BLE()
+        self.services = []
+        self.service_uuids = []
+        self.name = name
+        self.primary_uuid = None
+
+    def service(self, uuid, isPrimary=False, nbr_chars=0):
+        if uuid not in self.service_uuids:
+            self.service_uuids.append(uuid)
+            service = BleService(uuid=uuid, isPrimary=isPrimary)
+            if isPrimary:
+                self.primary_uuid = uuid
+            self.services.append(service)
+            return service
+
+    def register(self):
+        services = [ service.get() for service in self.services ]
+        return self._ble.gatts_register_services(services)
+
+    def advertising_payload(self):
+        if self.primary_uuid:
+            services = [ bluetooth.UUID(self.primary_uuid) ]
+        self._payload = advertising_payload(name=self.name, services=services)
+
+    def advertise(self, interval_us=500000):
+        payload = self.advertising_payload()
+        self._ble.gap_advertise(interval_us, adv_data=payload)
 
 class BLEUART:
     def __init__(self, ble, name="mpy-uart", rxbuf=100):
         self._ble = ble
         self._ble.active(True)
         self._ble.irq(self._irq)
-        ((self._tx_handle, self._rx_handle),) = self._ble.gatts_register_services((_UART_SERVICE,))
+
+        w_ble = BLE(self._ble) # helper
+        uart_service = w_ble.service(uuid="6E400001-B5A3-F393-E0A9-E50E24DCCA9E", isPrimary=True)
+        uart_service.characteristic(uuid="6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
+        uart_service.characteristic(uuid="6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
+
+        ftp_service = w_ble.service(uuid="6E400001-B5A3-F393-E0A9-E50E24DCCA77")
+        ftp_service.characteristic(uuid="6E400003-B5A3-F393-E0A9-E50E24DCCA77")
+        ftp_service.characteristic(uuid="6E400002-B5A3-F393-E0A9-E50E24DCCA77")
+
+        ((self._tx_handle, self._rx_handle), (self._ftp_tx_handle, self._ftp_rx_handle), ) = w_ble.register()
+
         # Increase the size of the rx buffer and enable append mode.
         self._ble.gatts_set_buffer(self._rx_handle, rxbuf, True)
         self._connections = set()
         self._rx_buffer = bytearray()
         self._handler = None
         # Optionally add services=[_UART_UUID], but this is likely to make the payload too large.
-        self._payload = advertising_payload(name=name, services=[_UART_UUID])
-        self._advertise()
+        w_ble.advertise()
 
     def irq(self, handler):
         self._handler = handler
@@ -84,9 +179,6 @@ class BLEUART:
         for conn_handle in self._connections:
             self._ble.gap_disconnect(conn_handle)
         self._connections.clear()
-
-    def _advertise(self, interval_us=500000):
-        self._ble.gap_advertise(interval_us, adv_data=self._payload)
 
 
 def demo():
