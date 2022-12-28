@@ -73,8 +73,8 @@ class BleService:
 
     def get(self):
         flag = F_RD_WR_NTFY
-        chrs = [ [bluetooth.UUID(uuid), flag]  for uuid in self.chr_uuids]
-        service = [self.uuid, chrs ]
+        chrs = [ [bluetooth.UUID(uuid), flag]  for uuid in self.chr_uuids ]
+        service = [ self.uuid, chrs ]
         #ex: service = ( _UART_UUID, (_UART_TX, _UART_RX), )
         return service
 
@@ -86,11 +86,10 @@ class BleService:
             return ble_char
 
 class BLE:
-    def __init__(self, ble, name="JEM-BLE"):
+    def __init__(self, ble):
         self._ble = ble # bluetooth.BLE()
         self.services = []
         self.service_uuids = []
-        self.name = name
         self.primary_uuid = None
 
     def service(self, uuid, isPrimary=False, nbr_chars=0):
@@ -107,25 +106,32 @@ class BLE:
         return self._ble.gatts_register_services(services)
 
     def advertising_payload(self):
-        if self.primary_uuid:
-            services = [ bluetooth.UUID(self.primary_uuid) ]
-        self._payload = advertising_payload(name=self.name, services=services)
+        services = []
+        for service in self.services:
+            if service.is_primary:
+                services = [ service.uuid ]
+                print("adv primary service %s" % service.uuid)
+
+        self._payload = advertising_payload(services=services)
+        return self._payload
 
     def advertise(self, interval_us=500000):
         payload = self.advertising_payload()
         self._ble.gap_advertise(interval_us, adv_data=payload)
 
 class BLEUART:
-    def __init__(self, ble, name="mpy-uart", rxbuf=100):
+    def __init__(self, ble, name="bleuart", rxbuf=100):
         self._ble = ble
         self._ble.active(True)
+        self._ble.config(gap_name=name)
         self._ble.irq(self._irq)
 
         w_ble = BLE(self._ble) # helper
         uart_service = w_ble.service(uuid="6E400001-B5A3-F393-E0A9-E50E24DCCA9E", isPrimary=True)
-        uart_service.characteristic(uuid="6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
-        uart_service.characteristic(uuid="6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
-
+        self.tx_char = uart_service.characteristic(uuid="6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
+        self.rx_char = uart_service.characteristic(uuid="6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
+        self.rx_char.callback(None, self.rx_char_cbk)
+        self.tx_char.callback(None, self.tx_char_cbk)
         ftp_service = w_ble.service(uuid="6E400001-B5A3-F393-E0A9-E50E24DCCA77")
         ftp_service.characteristic(uuid="6E400003-B5A3-F393-E0A9-E50E24DCCA77")
         ftp_service.characteristic(uuid="6E400002-B5A3-F393-E0A9-E50E24DCCA77")
@@ -138,7 +144,17 @@ class BLEUART:
         self._rx_buffer = bytearray()
         self._handler = None
         # Optionally add services=[_UART_UUID], but this is likely to make the payload too large.
-        w_ble.advertise()
+        self.w_ble = w_ble
+        self.advertise()
+
+    def advertise(self):
+        self.w_ble.advertise()
+
+    def rx_char_cbk(self):
+        print("rx_char_cbk")
+
+    def tx_char_cbk(self):
+        print("tx_char_cbk")
 
     def irq(self, handler):
         self._handler = handler
@@ -146,14 +162,16 @@ class BLEUART:
     def _irq(self, event, data):
         # Track connections so we can send notifications.
         if event == _IRQ_CENTRAL_CONNECT:
+            print("irq event: _IRQ_CENTRAL_CONNECT")
             conn_handle, _, _ = data
             self._connections.add(conn_handle)
         elif event == _IRQ_CENTRAL_DISCONNECT:
+            print("irq event: _IRQ_CENTRAL_DISCONNECT")
             conn_handle, _, _ = data
             if conn_handle in self._connections:
                 self._connections.remove(conn_handle)
             # Start advertising again to allow a new connection.
-            self._advertise()
+            self.advertise()
         elif event == _IRQ_GATTS_WRITE:
             conn_handle, value_handle = data
             if conn_handle in self._connections and value_handle == self._rx_handle:
