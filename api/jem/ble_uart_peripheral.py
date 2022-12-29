@@ -124,6 +124,7 @@ class BLEUART:
         self._ble = ble
         self._ble.active(True)
         self._ble.config(gap_name=name)
+        self._ble.config(mtu=200)
         self._ble.irq(self._irq)
 
         w_ble = BLE(self._ble) # helper
@@ -178,6 +179,8 @@ class BLEUART:
                 self._rx_buffer += self._ble.gatts_read(self._rx_handle)
                 if self._handler:
                     self._handler()
+        elif event == _IRQ_MTU_EXCHANGED:
+            print("_IRQ_MTU_EXCHANGED %s " % data)
 
     def any(self):
         return len(self._rx_buffer)
