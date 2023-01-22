@@ -9,7 +9,7 @@ import os
 import micropython
 import machine
 
-from ble_uart_peripheral import BLEUART
+from ble_uart_peripheral import BLEUART, BLE
 
 _MP_STREAM_POLL = const(3)
 _MP_STREAM_POLL_RD = const(0x0001)
@@ -72,12 +72,4 @@ class BLEUARTStream(io.IOBase):
         self._tx_buf += buf
         if empty:
             schedule_in(self._flush, 50)
-
-
-def start():
-    ble = bluetooth.BLE()
-    uart = BLEUART(ble, name="mpy-repl")
-    stream = BLEUARTStream(uart)
-
-    os.dupterm(stream)
 
