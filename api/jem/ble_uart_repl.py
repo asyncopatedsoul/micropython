@@ -3,13 +3,10 @@
 # Tested with the Adafruit Bluefruit app on Android.
 # Set the EoL characters to \r\n.
 
-import bluetooth
 import io
 import os
 import micropython
 import machine
-
-from ble_uart_peripheral import BLEUART, BLE
 
 _MP_STREAM_POLL = const(3)
 _MP_STREAM_POLL_RD = const(0x0001)
@@ -34,7 +31,7 @@ def schedule_in(handler, delay_ms):
 # Simple buffering stream to support the dupterm requirements.
 class BLEUARTStream(io.IOBase):
     def __init__(self, uart):
-        self._uart = uart
+        self._uart = uart # ble_uart_peripheral.py BLEUART object
         self._tx_buf = bytearray()
         self._uart.irq(self._on_rx)
 

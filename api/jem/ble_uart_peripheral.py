@@ -239,11 +239,11 @@ class BLE:
             print("_IRQ_MTU_EXCHANGED %s " % data)
 
 class BLEUART:
-    def __init__(self, jem_ble, rxbuf=100):
+    def __init__(self, jem_ble, service_uuid, tx_chr_uuid, rx_chr_uuid, rxbuf=100):
         self.ble = jem_ble # jem ble wrapper
-        uart_service = self.ble.service(uuid="6E400001-B5A3-F393-E0A9-E50E24DCCA9E", isPrimary=True)
-        self.tx_char = uart_service.characteristic(uuid="6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
-        self.rx_char = uart_service.characteristic(uuid="6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
+        uart_service = self.ble.service(uuid=service_uuid, isPrimary=True)
+        self.tx_char = uart_service.characteristic(uuid=tx_chr_uuid)
+        self.rx_char = uart_service.characteristic(uuid=rx_chr_uuid)
         self.rx_char.callback(None, self.rx_cbk)
         self.tx_char.callback(None, self.tx_cbk)
 
