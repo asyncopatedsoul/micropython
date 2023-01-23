@@ -5,28 +5,11 @@
 
 import io
 import os
-import micropython
 import machine
+from ble_uart_peripheral import schedule_in
 
 _MP_STREAM_POLL = const(3)
 _MP_STREAM_POLL_RD = const(0x0001)
-
-# TODO: Remove this when STM32 gets machine.Timer.
-if hasattr(machine, "Timer"):
-    _timer = machine.Timer(-1)
-else:
-    _timer = None
-
-# Batch writes into 50ms intervals.
-def schedule_in(handler, delay_ms):
-    def _wrap(_arg):
-        handler()
-
-    if _timer:
-        _timer.init(mode=machine.Timer.ONE_SHOT, period=delay_ms, callback=_wrap)
-    else:
-        micropython.schedule(_wrap, None)
-
 
 # Simple buffering stream to support the dupterm requirements.
 class BLEUARTStream(io.IOBase):

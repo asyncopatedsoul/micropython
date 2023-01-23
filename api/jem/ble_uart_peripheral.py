@@ -3,6 +3,7 @@
 import bluetooth
 from ble_advertising import advertising_payload
 
+import machine
 from micropython import const
 
 _IRQ_CENTRAL_CONNECT = const(1)
@@ -58,23 +59,22 @@ _UART_SERVICE = (
     (_UART_TX, _UART_RX),
 )
 
-# BLE UART FTP Service
-_FTP_UART_UUID = bluetooth.UUID("6E400001-B5A3-F393-E0A9-E50E24DCCA77")
+# TODO: Remove this when STM32 gets machine.Timer.
+if hasattr(machine, "Timer"):
+    _timer = machine.Timer(-1)
+else:
+    _timer = None
 
-_FTP_UART_TX = (
-    bluetooth.UUID("6E400003-B5A3-F393-E0A9-E50E24DCCA77"),
-    F_NOTIFY,
-)
+# Batch writes into 50ms intervals.
+def schedule_in(handler, delay_ms):
+    def _wrap(_arg):
+        handler()
 
-_FTP_UART_RX = (
-    bluetooth.UUID("6E400002-B5A3-F393-E0A9-E50E24DCCA77"),
-    F_WRITE,
-)
+    if _timer:
+        _timer.init(mode=machine.Timer.ONE_SHOT, period=delay_ms, callback=_wrap)
+    else:
+        micropython.schedule(_wrap, None)
 
-_FTP_UART_SERVICE = (
-    _FTP_UART_UUID,
-    (_FTP_UART_TX, _FTP_UART_RX),
-)
 
 # org.bluetooth.characteristic.gap.appearance.xml
 _ADV_APPEARANCE_GENERIC_COMPUTER = const(128)
@@ -152,6 +152,8 @@ class BLE:
                 self.primary_uuid = uuid
             self.services.append(service)
             return service
+        else:
+            printf("oops uuid %d already setup" % uuid)
 
     def get_chr_handles(self):
         char_handles = []
@@ -236,7 +238,7 @@ class BLE:
             print("_IRQ_GATTC_WRITE_DONE")
 
         elif event == _IRQ_MTU_EXCHANGED:
-            print("_IRQ_MTU_EXCHANGED %s " % data)
+            print("_IRQ_MTU_EXCHANGED")
 
 class BLEUART:
     def __init__(self, jem_ble, service_uuid, tx_chr_uuid, rx_chr_uuid, rxbuf=100):
@@ -247,27 +249,15 @@ class BLEUART:
         self.rx_char.callback(None, self.rx_cbk)
         self.tx_char.callback(None, self.tx_cbk)
 
-        ftp_service = self.ble.service(uuid="6E400001-B5A3-F393-E0A9-E50E24DCCA77")
-        self.ftp_char1 = ftp_service.characteristic(uuid="6E400003-B5A3-F393-E0A9-E50E24DCCA77")
-        self.ftp_char2 = ftp_service.characteristic(uuid="6E400002-B5A3-F393-E0A9-E50E24DCCA77")
-        self.ftp_char1.callback(None, self.ftp_char1_cbk)
-        self.ftp_char2.callback(None, self.ftp_char2_cbk)
-
         self._rx_buffer = bytearray()
         self._handler = None
-        self.ble.advertise()
+        #self.ble.advertise()
 
     def rx_cbk(self, chr, data=None):
         value = chr.value()
         self._rx_buffer += value
         if self._handler:
             self._handler()
-
-    def ftp_char2_cbk(self, chr, data=None):
-        print("ftp_char2_cbk")
-
-    def ftp_char1_cbk(self, chr, data=None):
-        print("ftp_char1_cbk")
 
     def tx_cbk(self):
         print("tx_char_cbk")
