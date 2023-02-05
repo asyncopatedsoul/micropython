@@ -2,50 +2,43 @@
 Micropython code for JEM core
 
 ## Quickstart
-### Install Atom IDE + Pymakr plugin
-- [Atom IDE Download](https://atom.io/)
-- [Atom Pymakr Plugin](https://atom.io/packages/pymakr)
-   + Used by Atom to talk to JEM Micropython
+### Install Thonny IDE
+- [Thonny IDE Download](https://github.com/thonny/thonny/releases)
+- Configure Thonny to talk to JEM ESP32 MCU
+   + In top toolbar click 'Run' -> 'Configure interpreter'
+   + Select 'MicroPython (ESP32)' from dropdown list of MicroPython options
+   + Select 'Try to detect port automatically' from select Port dropdown list
+- Reset JEM board and plug into computer via micro usb
+- In Thonny shell / terminal you should be able to communicate with JEM REPL (press enter to see REPL prompt)
+- In left hand side of Thonny IDE you should see the file explorer for your JEM device ('MicroPython Device')
+   + Add a print('hello world') to your main.py file and then click save and the JEM will automatically update with new code
+- You can also add new directories and files to JEM via the file explorer, just right click and select new directory or file
+- That's it!
 
 ### Flash latest Kitlab JEM Micropython to board
 - Download / unzip latest Kitlab JEM micropython [release](https://github.com/kitlab-io/micropython/releases)
-- Open Atom IDE and open directory **./micropython/api/jem**
-- Turn on JEM board
-- Open Pymakr terminal which will appear at bottom of Atom IDE
-- Set Pymakr to upload all file types (not just python) by clicking on **Pymakr -> Settings -> Global -> Upload all file types**
-- Click 'Connect' to talk to JEM
-- Click 'Upload' to flash latest code to JEM
+- Open Thonny IDE (if you don't have it open already)
+- In the 'This Computer' file explorer on left hand side navigate to where you downloaded JEM Micropython Library
+   + ex: /Users/YourName/downloads/micropython-window-kit-v1.0.0
+- Open the micropython-window-kit-v1.0.0/micropython/api/jem directory (where the file main.py lives)
+   + **IMPORTANT:** you must be in the 'api/jem' directory when flashing code to JEM or device will not work properly
+- Turn on JEM board and connect to USB and make sure Thonny shell can talk to JEM (press enter to see REPL prompt)
+- In the **micropython-window-kit-v1.0.0/micropython/api/jem** directory click on the hamburger menu on the right side of the file explorer and click 'Upload to /'
+- It may take 1 - 2 minutes but the JEM should now have the latest code
+- At the bottom of the file explorer you should see that the JEM's internal file system ('MicroPython Device') has updated with the new code
 
 ### Run Demo application
 - JEM Micropython code comes installed with a simple demo app
-   + After power up it takes about 10 seconds for JEM to initialize
-   + Then you can press the JEM user button and the RGB LED should turn green
-- If you want to play around with the Demo, connect micro usb to JEM and open Pymakr terminal
-- Interact with JEM Demo App using following micropython commands from REPL
+- Interact with JEM Demo App using following micropython commands from REPL (using Thonny IDE shell)
 ```bash
-# initially a button press thread is running that turns led green if pressed
-# you can stop this by doing
->> kit._run = False #
-# you can also stop the main demo thread that is collecting imu data to send to app by doing this
->> kit._main_thread = False
-# now you can mess around
->> kit.jem.led.set_color(0x880000) # jem red rgb led
->> kit.jem.led.set_color(0x000088) # jem blue rgb led
->> kit.jem.imu.orientation # show roll, pitch, yaw degrees
->> kit.jem.buzzer.start(freq_hz = 100) # make buzzer sound
->> kit.jem.buzzer.stop()
->> kit.neopixel.sparkle(count=10) # randomly turns on ten leds, default color is white but you can change
->> kit.neopixel.sparkle(count=10, c=(127,0,0)) # sparkle red
->> kit.neopixel.sparkle(count=10, c=(0,0,127)) # sparkle blue
->> kit.neopixel.rainbow() # do some fancy lantern led show (take about 15 seconds)
->> kit.jem.btn.read() # read button value
-```
-
-### Demo Application using Neopixel + IMU
-```bash
->> kit.start_sparkle_motion_thread(count=25, rainbow=True)
->> # now move the jem around a bit (around the roll axis is best)
->> demo.stop_sparkle_motion_thread()
+>> from jem import Jem
+>> jem = Jem() # create jem board object
+>> jem.led.set_color(0x880000) # jem red rgb led
+>> jem.led.set_color(0x000088) # jem blue rgb led
+>> jem.imu.orientation # show roll, pitch, yaw degrees
+>> jem.buzzer.start(freq_hz = 100) # make buzzer sound
+>> jem.buzzer.stop()
+>> jem.btn.read() # read button value
 ```
 
 ## Advanced
@@ -63,7 +56,7 @@ p_out.toggle()
 p_out(True)
 ```
 
-- For more examples see [Pycom Micropython API](https://docs.pycom.io/firmwareapi/pycom/machine/)
+- For more examples see [MicroPython ESP32 Docs](https://docs.micropython.org/en/latest/esp32/quickref.html#pins-and-gpio)
 
 ### JEM Sensors
 ```python
@@ -117,7 +110,3 @@ wifi = setup_wifi(name="JemWifi")
 
 ## JEM Board
 ![Image of JEM Board V5.1.0](docs/JEM-V5.1.0-drawing.png)
-
-## Update JEM Pycom WIPY 3.0 firmware
-- [pycom firmware update](https://docs.pycom.io/updatefirmware/device/)
-  + Make sure to use firmware version specified in the JEM Micropython [Releases](https://github.com/kitlab-io/micropython/releases)
