@@ -2,40 +2,41 @@
 
 import bluetooth
 from ble_advertising import advertising_payload
-
-import machine
+import utime
+import machine, _thread
 from micropython import const
 
-_IRQ_CENTRAL_CONNECT = const(1)
-_IRQ_CENTRAL_DISCONNECT = const(2)
-_IRQ_GATTS_WRITE = const(3)
-_IRQ_GATTS_READ_REQUEST = const(4)
-_IRQ_SCAN_RESULT = const(5)
-_IRQ_SCAN_DONE = const(6)
-_IRQ_PERIPHERAL_CONNECT = const(7)
-_IRQ_PERIPHERAL_DISCONNECT = const(8)
-_IRQ_GATTC_SERVICE_RESULT = const(9)
-_IRQ_GATTC_SERVICE_DONE = const(10)
-_IRQ_GATTC_CHARACTERISTIC_RESULT = const(11)
-_IRQ_GATTC_CHARACTERISTIC_DONE = const(12)
-_IRQ_GATTC_DESCRIPTOR_RESULT = const(13)
-_IRQ_GATTC_DESCRIPTOR_DONE = const(14)
-_IRQ_GATTC_READ_RESULT = const(15)
-_IRQ_GATTC_READ_DONE = const(16)
-_IRQ_GATTC_WRITE_DONE = const(17)
-_IRQ_GATTC_NOTIFY = const(18)
-_IRQ_GATTC_INDICATE = const(19)
-_IRQ_GATTS_INDICATE_DONE = const(20)
-_IRQ_MTU_EXCHANGED = const(21)
-_IRQ_L2CAP_ACCEPT = const(22)
-_IRQ_L2CAP_CONNECT = const(23)
-_IRQ_L2CAP_DISCONNECT = const(24)
-_IRQ_L2CAP_RECV = const(25)
-_IRQ_L2CAP_SEND_READY = const(26)
-_IRQ_CONNECTION_UPDATE = const(27)
-_IRQ_ENCRYPTION_UPDATE = const(28)
-_IRQ_GET_SECRET = const(29)
-_IRQ_SET_SECRET = const(30)
+
+IRQ_CENTRAL_CONNECT = const(1)
+IRQ_CENTRAL_DISCONNECT = const(2)
+IRQ_GATTS_WRITE = const(3)
+IRQ_GATTS_READ_REQUEST = const(4)
+IRQ_SCAN_RESULT = const(5)
+IRQ_SCAN_DONE = const(6)
+IRQ_PERIPHERAL_CONNECT = const(7)
+IRQ_PERIPHERAL_DISCONNECT = const(8)
+IRQ_GATTC_SERVICE_RESULT = const(9)
+IRQ_GATTC_SERVICE_DONE = const(10)
+IRQ_GATTC_CHARACTERISTIC_RESULT = const(11)
+IRQ_GATTC_CHARACTERISTIC_DONE = const(12)
+IRQ_GATTC_DESCRIPTOR_RESULT = const(13)
+IRQ_GATTC_DESCRIPTOR_DONE = const(14)
+IRQ_GATTC_READ_RESULT = const(15)
+IRQ_GATTC_READ_DONE = const(16)
+IRQ_GATTC_WRITE_DONE = const(17)
+IRQ_GATTC_NOTIFY = const(18)
+IRQ_GATTC_INDICATE = const(19)
+IRQ_GATTS_INDICATE_DONE = const(20)
+IRQ_MTU_EXCHANGED = const(21)
+IRQ_L2CAP_ACCEPT = const(22)
+IRQ_L2CAP_CONNECT = const(23)
+IRQ_L2CAP_DISCONNECT = const(24)
+IRQ_L2CAP_RECV = const(25)
+IRQ_L2CAP_SEND_READY = const(26)
+IRQ_CONNECTION_UPDATE = const(27)
+IRQ_ENCRYPTION_UPDATE = const(28)
+IRQ_GET_SECRET = const(29)
+IRQ_SET_SECRET = const(30)
 
 F_READ = bluetooth.FLAG_READ
 F_WRITE = bluetooth.FLAG_WRITE
@@ -58,22 +59,15 @@ _UART_SERVICE = (
     _UART_UUID,
     (_UART_TX, _UART_RX),
 )
+    
 
-# TODO: Remove this when STM32 gets machine.Timer.
-if hasattr(machine, "Timer"):
-    _timer = machine.Timer(-1)
-else:
-    _timer = None
-
-# Batch writes into 50ms intervals.
-def schedule_in(handler, delay_ms):
+# Batch writes into ms intervals .
+def schedule_in(tmr, handler, delay_ms):
     def _wrap(_arg):
         handler()
 
-    if _timer:
-        _timer.init(mode=machine.Timer.ONE_SHOT, period=delay_ms, callback=_wrap)
-    else:
-        micropython.schedule(_wrap, None)
+    tmr.init(mode=machine.Timer.ONE_SHOT, period=delay_ms, callback=_wrap)
+        
 
 
 # org.bluetooth.characteristic.gap.appearance.xml
@@ -138,7 +132,7 @@ class BLE:
 
         self._ble.active(True)
         self._ble.config(gap_name=name)
-        self._ble.config(mtu=200)
+        #self._ble.config(mtu=200)
         self._ble.irq(self._irq)
 
         # Increase the size of the rx buffer and enable append mode.
@@ -153,7 +147,7 @@ class BLE:
             self.services.append(service)
             return service
         else:
-            printf("oops uuid %d already setup" % uuid)
+            print("oops uuid %d already setup" % uuid)
 
     def get_chr_handles(self):
         char_handles = []
@@ -181,7 +175,7 @@ class BLE:
                 # and value_handle is one created by esp32 ble driver
                 char_handle.value_handle = value_handle
                 if char_handle.buf_size:
-                    self._ble.gatts_set_buffer(value_handle.value_handle, value_handle.buf_size, True)
+                    self._ble.gatts_set_buffer(char_handle.value_handle, char_handle.buf_size, True)
 
     def advertising_payload(self):
         services = []
@@ -209,43 +203,43 @@ class BLE:
 
     def _irq(self, event, data):
         # Track connections so we can send notifications.
-        if event == _IRQ_CENTRAL_CONNECT:
-            print("irq event: _IRQ_CENTRAL_CONNECT")
+        if event == IRQ_CENTRAL_CONNECT:
+            print("irq event: IRQ_CENTRAL_CONNECT")
             conn_handle, _, _ = data
             self._connections.add(conn_handle)
-        elif event == _IRQ_CENTRAL_DISCONNECT:
-            print("irq event: _IRQ_CENTRAL_DISCONNECT")
+        elif event == IRQ_CENTRAL_DISCONNECT:
+            print("irq event: IRQ_CENTRAL_DISCONNECT")
             conn_handle, _, _ = data
             if conn_handle in self._connections:
                 self._connections.remove(conn_handle)
             # Start advertising again to allow a new connection.
             self.advertise()
-        elif event == _IRQ_GATTS_WRITE or event == _IRQ_GATTS_READ_REQUEST or event == _IRQ_GATTS_INDICATE_DONE:
+        elif event == IRQ_GATTS_WRITE or event == IRQ_GATTS_READ_REQUEST or event == IRQ_GATTS_INDICATE_DONE:
             conn_handle, value_handle = data
             if conn_handle in self._connections and value_handle in self.char_handles_map:
                 # self._rx_buffer += self._ble.gatts_read(self._rx_handle)
-                if event == _IRQ_GATTS_WRITE:
+                if event == IRQ_GATTS_WRITE:
                     value = self._ble.gatts_read(value_handle)
                     char_handle = self.char_handles_map[value_handle] # ex: self.rx_char
                     char_handle.irq(event, value)
-                elif event == _IRQ_GATTS_READ_REQUEST:
-                    print("_IRQ_GATTS_READ_REQUEST unhandled")
-                elif event == _IRQ_GATTS_INDICATE_DONE:
-                    print("_IRQ_GATTS_INDICATE_DONE unhandled")
+                elif event == IRQ_GATTS_READ_REQUEST:
+                    char_handle.irq(event, None)
+                elif event == IRQ_GATTS_INDICATE_DONE:
+                    char_handle.irq(event, None)
             else:
                 print("Fail: %s not in %s" % (value_handle, self.char_handles_map))
-        elif event == _IRQ_GATTC_WRITE_DONE:
-            print("_IRQ_GATTC_WRITE_DONE")
+        elif event == IRQ_GATTC_WRITE_DONE:
+            print("IRQ_GATTC_WRITE_DONE")
 
-        elif event == _IRQ_MTU_EXCHANGED:
-            print("_IRQ_MTU_EXCHANGED")
+        elif event == IRQ_MTU_EXCHANGED:
+            print("IRQ_MTU_EXCHANGED: %s" % data[1])
 
 class BLEUART:
-    def __init__(self, jem_ble, service_uuid, tx_chr_uuid, rx_chr_uuid, rxbuf=100):
+    def __init__(self, jem_ble, service_uuid, tx_chr_uuid, rx_chr_uuid, rxbuf=100, primary=False):
         self.ble = jem_ble # jem ble wrapper
-        uart_service = self.ble.service(uuid=service_uuid, isPrimary=True)
-        self.tx_char = uart_service.characteristic(uuid=tx_chr_uuid)
-        self.rx_char = uart_service.characteristic(uuid=rx_chr_uuid)
+        self.service = self.ble.service(uuid=service_uuid, isPrimary=primary)
+        self.tx_char = self.service.characteristic(uuid=tx_chr_uuid, buf_size=rxbuf)
+        self.rx_char = self.service.characteristic(uuid=rx_chr_uuid, buf_size=rxbuf)
         self.rx_char.callback(None, self.rx_cbk)
         self.tx_char.callback(None, self.tx_cbk)
 
@@ -254,10 +248,14 @@ class BLEUART:
         #self.ble.advertise()
 
     def rx_cbk(self, chr, data=None):
-        value = chr.value()
-        self._rx_buffer += value
-        if self._handler:
-            self._handler()
+        try:
+            if IRQ_GATTS_WRITE == chr.event():
+                value = chr.value()
+                self._rx_buffer += value
+                if self._handler:
+                    self._handler()
+        except Exception as e:
+            print("rx_cbk failed %s" % e)
 
     def tx_cbk(self):
         print("tx_char_cbk")
